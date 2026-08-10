@@ -285,7 +285,7 @@
     .calendar-grid{
       display:grid;
       grid-template-columns: 50px repeat(5, minmax(0, 1fr));
-      grid-template-rows: 24px repeat(6, 54px);
+      grid-template-rows: 40px repeat(6, 54px);
       gap:5px;
     }
 
@@ -299,10 +299,30 @@
       display:flex;
       align-items:center;
       justify-content:center;
+      flex-direction:column;
+      gap:1px;
       font-size:.72rem;
       font-weight:900;
       background:var(--surface-2);
       color:var(--muted);
+      text-align:center;
+      line-height:1.05;
+      padding:4px 2px;
+    }
+
+    .grid-head .day-date{
+      font-size:.67rem;
+      font-weight:900;
+      color:inherit;
+    }
+
+    .grid-head .day-short{
+      font-size:.6rem;
+      font-weight:800;
+      text-transform:lowercase;
+      letter-spacing:.02em;
+      color:inherit;
+      opacity:.9;
     }
 
     .grid-head.is-today{
@@ -354,6 +374,21 @@
     }
 
     .lesson.has-task .lesson-dot{ display:block; }
+
+    .lesson-dot.progress-done{
+      background:var(--success);
+      box-shadow:0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+    }
+
+    .lesson-dot.progress-partial{
+      background:#f59e0b;
+      box-shadow:0 0 0 3px color-mix(in srgb, #f59e0b 18%, transparent);
+    }
+
+    .lesson-dot.progress-todo{
+      background:var(--danger);
+      box-shadow:0 0 0 3px rgba(220,38,38,.15);
+    }
 
     .lesson-name{
       font-size:.73rem;
@@ -623,6 +658,15 @@
       padding:8px 10px 12px;
       backdrop-filter: blur(10px);
       z-index:20;
+    }
+
+    body.viewer-mode .bottom-nav{
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+    }
+
+    body.viewer-mode #tabTask,
+    body.viewer-mode #view-task{
+      display:none !important;
     }
 
     .tab-btn{
@@ -1120,14 +1164,26 @@
     taskSearchInput: document.getElementById('taskSearchInput')
   };
 
+  const IS_VIEWER = /(?:^|[\\/])viewer\.html(?:[?#]|$)/i.test(location.pathname + location.search + location.hash);
   const state = loadState();
-  let currentWeekOffset = state.currentWeekOffset ?? 0;
+
+  if(IS_VIEWER){
+    document.body.classList.add('viewer-mode');
+    if(el.tabTask) el.tabTask.style.display = 'none';
+    if(el.viewTask) el.viewTask.style.display = 'none';
+    if(el.taskFillChip) el.taskFillChip.textContent = 'Modo visualização';
+  }
+  let currentWeekOffset = state.currentWeekOffset ?? 1;
   let activeTab = 'calendar';
   let selectedStatus = 'não feito';
   let editingId = null;
   let activeTaskFilter = 'pending';
   let colors = {...defaults.colors, ...(state.colors || {})};
   let theme = state.theme || defaults.theme;
+
+  if(IS_VIEWER){
+    document.body.classList.add('viewer-mode');
+  }
 
   function loadState(){
     const keys = [STORAGE_KEY, ...LEGACY_KEYS];
@@ -1263,6 +1319,19 @@
     return date.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
   }
 
+  function formatDayHeader(date, dayShort){
+    return `${formatShort(date)} ${dayShort.toLowerCase()}`;
+  }
+
+  function slotProgress(weekOffset, dayIndex, subject){
+    const items = state.tasks.filter(t => t.weekOffset === weekOffset && t.mode === 'day' && Number(t.day) === dayIndex && t.subject === subject);
+    if(!items.length) return { kind: 'none', count: 0 };
+    const statuses = items.map(t => t.status || 'não feito');
+    if(statuses.every(s => s === 'concluído')) return { kind: 'done', count: items.length };
+    if(statuses.some(s => s === 'incompleto')) return { kind: 'partial', count: items.length };
+    return { kind: 'todo', count: items.length };
+  }
+
   function formatRangeForWeek(weekOffset){
     const start = weekStart(new Date());
     start.setDate(start.getDate() + weekOffset * 7);
@@ -1348,11 +1417,13 @@
       rows.push(`<div class="time-cell">${schedule[0].classes[row][0]}</div>`);
       for(const day of schedule){
         const [time, subj] = day.classes[row];
-        const count = countForSlot(currentWeekOffset, day.index, subj);
+        const slot = slotProgress(currentWeekOffset, day.index, subj);
+        const count = slot.count;
+        const progressClass = slot.kind === 'done' ? 'progress-done' : (slot.kind === 'partial' ? 'progress-partial' : 'progress-todo');
         const colorClass = subjectClass(subj);
         rows.push(`
           <button class="lesson ${colorClass} ${count ? 'has-task' : ''}" data-week="${currentWeekOffset}" data-day="${day.index}" data-subject="${subj}" type="button">
-            <span class="lesson-dot"></span>
+            <span class="lesson-dot ${count ? progressClass : ''}"></span>
             <span class="lesson-name">${subj}</span>
             <span class="lesson-time">${time}</span>
             ${count ? `<span class="lesson-badge">${count} tarefa${count>1 ? 's' : ''}</span>` : ''}
@@ -1363,8 +1434,9 @@
 
     let topRow = `<div class="grid-head">Hor.</div>`;
     for(const day of schedule){
+      const date = dateForWeekDay(currentWeekOffset, day.index);
       const isToday = currentWeekOffset === 0 && day.index === todayIndex;
-      topRow += `<div class="grid-head ${isToday ? 'is-today' : ''}">${day.day}${isToday ? ' • Hoje' : ''}</div>`;
+      topRow += `<div class="grid-head ${isToday ? 'is-today' : ''}"><span class="day-date">${formatShort(date)}</span><span class="day-short">${day.day.toLowerCase()}</span></div>`;
     }
 
     el.calendarGrid.innerHTML = topRow + rows.join('');
@@ -1405,6 +1477,7 @@
       const isNext = task.mode === 'nextClass';
       const subjColor = colors[task.subject] || '#2563eb';
       const statusPillClass = task.status === 'concluído' ? 'status-done' : (task.status === 'incompleto' ? 'status-inc' : '');
+      const canEditDetails = !IS_VIEWER;
 
       return `
         <div class="task-item" data-id="${task.id}" style="border-left-color: ${subjColor};">
@@ -1424,8 +1497,8 @@
             <button class="ghost-btn small-btn" data-action="status" data-id="${task.id}" data-status="não feito">não feito</button>
             <button class="ghost-btn small-btn" data-action="status" data-id="${task.id}" data-status="incompleto">incompleto</button>
             <button class="success-btn small-btn" data-action="status" data-id="${task.id}" data-status="concluído">concluído</button>
-            <button class="ghost-btn small-btn" data-action="edit" data-id="${task.id}">Editar</button>
-            <button class="danger-btn small-btn" data-action="delete" data-id="${task.id}">Excluir</button>
+            ${canEditDetails ? `<button class="ghost-btn small-btn" data-action="edit" data-id="${task.id}">Editar</button>
+            <button class="danger-btn small-btn" data-action="delete" data-id="${task.id}">Excluir</button>` : ''}
           </div>
         </div>
       `;
@@ -1442,7 +1515,9 @@
     el.statDone.textContent = `${done}%`;
     el.weekLabel.textContent = weekTitle(currentWeekOffset);
     el.weekRangeChip.textContent = formatRangeForWeek(currentWeekOffset);
-    el.headerSubtitle.textContent = `${weekTitle(currentWeekOffset)} • toque em uma aula para criar tarefa`;
+    el.headerSubtitle.textContent = IS_VIEWER
+      ? `${weekTitle(currentWeekOffset)} • ajuste o status das tarefas na aba Tarefas`
+      : `${weekTitle(currentWeekOffset)} • toque em uma aula para criar tarefa`;
   }
 
   function renderTaskPreview(){
@@ -1461,6 +1536,7 @@
   }
 
   function setActiveTab(tab){
+    if(IS_VIEWER && tab === 'task') tab = 'pending';
     activeTab = tab;
     el.viewCalendar.classList.toggle('active', tab === 'calendar');
     el.viewTask.classList.toggle('active', tab === 'task');
@@ -1481,6 +1557,11 @@
   }
 
   function openTaskTab(prefill = null, focusNote = true){
+    if(IS_VIEWER){
+      setActiveTab('pending');
+      showToast('Modo visualização: altere o status na aba Tarefas.');
+      return;
+    }
     setActiveTab('task');
     if(prefill){
       editingId = null;
@@ -1532,6 +1613,10 @@
   }
 
   function saveTask(){
+    if(IS_VIEWER){
+      showToast('Modo visualização: não é possível criar ou editar tarefas.');
+      return;
+    }
     const mode = el.taskMode.value;
     const task = {
       id: editingId || uid(),
@@ -1572,6 +1657,7 @@
   }
 
   function deleteTask(id){
+    if(IS_VIEWER) return;
     if(!confirm('Excluir esta tarefa?')) return;
     state.tasks = state.tasks.filter(t => t.id !== id);
     saveState();
@@ -1582,6 +1668,7 @@
   }
 
   function editTask(id){
+    if(IS_VIEWER) return;
     const task = state.tasks.find(t => t.id === id);
     if(!task) return;
     editingId = task.id;
@@ -1609,6 +1696,11 @@
         saveState();
         renderCalendar();
         updateStats();
+        if(IS_VIEWER){
+          setActiveTab('pending');
+          showToast(`Modo visualização: use os botões de status para ajustar a tarefa.`);
+          return;
+        }
         openTaskTab({ subject: subj, mode: 'day', day, nextClassSubject: subj, status: 'não feito' });
         showToast(`${subj} • ${weekNames[day]}`);
       });
