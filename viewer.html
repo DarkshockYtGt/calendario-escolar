@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Calendário Escolar 9º B</title>
-  <link rel="manifest" href="manifest.json" />
-  <link rel="icon" href="icon-192.png" type="image/png" />
-  <link rel="apple-touch-icon" href="icon-180.png" />
-  <meta name="theme-color" content="#2563eb" />
+  <title>Calendário 9º B (visualizar)</title>
+  <link rel="manifest" href="manifest-viewer.json" />
+  <link rel="icon" href="viewer-icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="viewer-icon-180.png" />
+  <meta name="theme-color" content="#7c3aed" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Calendário 9B" />
+  <meta name="apple-mobile-web-app-title" content="9B Ver" />
   <style>
     :root{
       --bg:#f3f6fb;
@@ -783,6 +783,8 @@
       .summary-grid{ gap:6px; }
       .stat{ padding:8px; }
     }
+    #tabTask, #backupField{ display:none !important; }
+    .bottom-nav{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
   </style>
 </head>
 <body>
@@ -792,7 +794,7 @@
         <div class="logo">9B</div>
         <div>
           <h1>Calendário Escolar</h1>
-          <p id="headerSubtitle">Semana atual • toque em uma aula para criar tarefa</p>
+          <p id="headerSubtitle">Semana atual • atualiza sozinho quando uma tarefa nova é criada</p>
         </div>
       </div>
       <div class="top-tools">
@@ -974,7 +976,7 @@
               <button class="ghost-btn small-btn" id="autoBtn">Automático</button>
             </div>
           </div>
-          <div class="field">
+          <div class="field" id="backupField">
             <label>Backup e Dados</label>
             <div class="task-actions">
               <button class="ghost-btn small-btn" id="exportBtn">Exportar</button>
@@ -998,11 +1000,9 @@
   <input type="file" id="importFile" accept="application/json" style="display:none" />
   <div class="toast" id="toast"></div>
 
-  <!-- ===== Firebase (sincronização entre aparelhos) =====
-       1) Crie um projeto grátis em https://console.firebase.google.com
-       2) Ative "Firestore Database" (modo produção) e cole as regras do tutorial
-       3) Em Configurações do projeto → Geral → seus apps, copie o objeto "firebaseConfig"
-          e cole no lugar do objeto abaixo, sem apagar o "const firebaseConfig = { ... };"
+  <!-- ===== Firebase (leitura em tempo real) =====
+       Use exatamente a MESMA firebaseConfig do app principal (mesmo projeto),
+       senão este app vai olhar pra um banco de dados vazio/diferente.
   -->
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
@@ -1028,16 +1028,8 @@
 
 <script>
 (() => {
-  const STORAGE_KEY = 'calendario_escolar_9b_g54_tabs_v3';
-  const LEGACY_KEYS = [
-    'calendario_escolar_9b_g54_tabs_v2',
-    'calendario_escolar_9b_g54_tabs_v1',
-    'calendario_escolar_9b_final_fix_v1',
-    'calendario_escolar_9b_profissional_mobile',
-    'calendario_escolar_9b_reparado_preenchimento',
-    'calendario_escolar_9b_app_mobilefix',
-    'calendario_escolar_9b_app'
-  ];
+  const STORAGE_KEY = 'calendario_escolar_9b_viewer_v1';
+  const LEGACY_KEYS = [];
 
   const defaults = {
     colors: {
@@ -1420,13 +1412,6 @@
             <span class="mini-pill">${isNext ? 'próxima aula' : 'dia fixo'}</span>
           </div>
           ${task.note ? `<div class="task-note">${escapeHtml(task.note)}</div>` : ''}
-          <div class="task-actions">
-            <button class="ghost-btn small-btn" data-action="status" data-id="${task.id}" data-status="não feito">não feito</button>
-            <button class="ghost-btn small-btn" data-action="status" data-id="${task.id}" data-status="incompleto">incompleto</button>
-            <button class="success-btn small-btn" data-action="status" data-id="${task.id}" data-status="concluído">concluído</button>
-            <button class="ghost-btn small-btn" data-action="edit" data-id="${task.id}">Editar</button>
-            <button class="danger-btn small-btn" data-action="delete" data-id="${task.id}">Excluir</button>
-          </div>
         </div>
       `;
     }).join('');
@@ -1604,12 +1589,6 @@
       btn.addEventListener('click', () => {
         const subj = btn.dataset.subject;
         const day = Number(btn.dataset.day);
-        const weekOffset = Number(btn.dataset.week);
-        currentWeekOffset = weekOffset;
-        saveState();
-        renderCalendar();
-        updateStats();
-        openTaskTab({ subject: subj, mode: 'day', day, nextClassSubject: subj, status: 'não feito' });
         showToast(`${subj} • ${weekNames[day]}`);
       });
     });
@@ -1851,7 +1830,7 @@
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(err => {
+      navigator.serviceWorker.register('./sw-viewer.js').catch(err => {
         console.warn('Service worker não registrado (normal se o arquivo foi aberto direto, sem hospedagem):', err);
       });
     });
