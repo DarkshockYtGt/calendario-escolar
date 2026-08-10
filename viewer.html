@@ -669,6 +669,10 @@
       display:none !important;
     }
 
+    body.viewer-mode .status-row{
+      display:none !important;
+    }
+
     .tab-btn{
       display:flex;
       flex-direction:column;
@@ -1164,8 +1168,15 @@
     if(el.tabTask) el.tabTask.style.display = 'none';
     if(el.viewTask) el.viewTask.style.display = 'none';
     if(el.taskFillChip) el.taskFillChip.textContent = 'Modo visualização';
+    if(el.statusRow) el.statusRow.style.display = 'none';
   }
-  let currentWeekOffset = state.currentWeekOffset ?? 1;
+  const nowForWeek = new Date();
+  const defaultWeekOffset = (nowForWeek.getDay() === 0 || nowForWeek.getDay() === 6) ? 1 : 0;
+  const savedWeekStart = parseLocalDateKey(state.weekStartKey);
+  const savedOffset = Number.isFinite(state.currentWeekOffset) ? state.currentWeekOffset : defaultWeekOffset;
+  let currentWeekOffset = savedWeekStart
+    ? Math.max(savedOffset - weekDiffWeeks(nowForWeek, savedWeekStart), defaultWeekOffset)
+    : defaultWeekOffset;
   let activeTab = 'calendar';
   let selectedStatus = 'não feito';
   let editingId = null;
@@ -1188,13 +1199,14 @@
           return {
             tasks: parsed.tasks,
             currentWeekOffset: Number.isFinite(parsed.currentWeekOffset) ? parsed.currentWeekOffset : 0,
+            weekStartKey: typeof parsed.weekStartKey === 'string' ? parsed.weekStartKey : null,
             colors: parsed.colors || null,
             theme: parsed.theme || null
           };
         }
       }catch{}
     }
-    return { tasks: [], currentWeekOffset: 0, colors: null, theme: null };
+    return { tasks: [], currentWeekOffset: 0, weekStartKey: null, colors: null, theme: null };
   }
 
   function saveState(){
@@ -1202,6 +1214,7 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         tasks: state.tasks,
         currentWeekOffset,
+        weekStartKey: localDateKey(weekStart(new Date())),
         colors,
         theme
       }));
@@ -1315,9 +1328,36 @@
     return `${formatShort(date)} ${dayShort.toLowerCase()}`;
   }
 
+  function localDateKey(date){
+    const d = new Date(date);
+    d.setHours(0,0,0,0);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function parseLocalDateKey(key){
+    if(typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+    const [y, m, d] = key.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    date.setHours(0,0,0,0);
+    return date;
+  }
+
+  function weekDiffWeeks(a, b){
+    const ms = weekStart(a).getTime() - weekStart(b).getTime();
+    return Math.round(ms / 604800000);
+  }
+
+  function taskStatus(task){
+    return IS_VIEWER ? 'não feito' : (task.status || 'não feito');
+  }
+
   function slotProgress(weekOffset, dayIndex, subject){
     const items = state.tasks.filter(t => t.weekOffset === weekOffset && t.mode === 'day' && Number(t.day) === dayIndex && t.subject === subject);
     if(!items.length) return { kind: 'none', count: 0 };
+    if(IS_VIEWER) return { kind: 'todo', count: items.length };
     const statuses = items.map(t => t.status || 'não feito');
     if(statuses.every(s => s === 'concluído')) return { kind: 'done', count: items.length };
     if(statuses.some(s => s === 'incompleto')) return { kind: 'partial', count: items.length };
@@ -1440,9 +1480,9 @@
     let filteredTasks = tasksForWeek(currentWeekOffset);
 
     if (activeTaskFilter === 'pending') {
-      filteredTasks = filteredTasks.filter(t => t.status !== 'concluído');
+      filteredTasks = filteredTasks.filter(t => taskStatus(t) !== 'concluído');
     } else if (activeTaskFilter === 'completed') {
-      filteredTasks = filteredTasks.filter(t => t.status === 'concluído');
+      filteredTasks = filteredTasks.filter(t => taskStatus(t) === 'concluído');
     }
 
     if (searchTerm) {
@@ -1455,7 +1495,7 @@
 
     filteredTasks.sort((a,b) => resolveDue(a).date - resolveDue(b).date);
 
-    const totalPendingInWeek = tasksForWeek(currentWeekOffset).filter(t => t.status !== 'concluído').length;
+    const totalPendingInWeek = tasksForWeek(currentWeekOffset).filter(t => taskStatus(t) !== 'concluído').length;
     el.pendingCountChip.textContent = `${filteredTasks.length} exibida${filteredTasks.length === 1 ? '' : 's'}`;
     el.pendingChip.textContent = `${totalPendingInWeek} pendentes`;
 
@@ -1468,7 +1508,8 @@
       const due = resolveDue(task);
       const isNext = task.mode === 'nextClass';
       const subjColor = colors[task.subject] || '#2563eb';
-      const statusPillClass = task.status === 'concluído' ? 'status-done' : (task.status === 'incompleto' ? 'status-inc' : '');
+      const status = taskStatus(task);
+      const statusPillClass = status === 'concluído' ? 'status-done' : (status === 'incompleto' ? 'status-inc' : '');
       const canEditDetails = !IS_VIEWER;
 
       return `
@@ -1485,13 +1526,13 @@
             <span class="mini-pill">${isNext ? 'próxima aula' : 'dia fixo'}</span>
           </div>
           ${task.note ? `<div class="task-note">${escapeHtml(task.note)}</div>` : ''}
-          <div class="task-actions">
+          ${canEditDetails ? `<div class="task-actions">
             <button class="ghost-btn small-btn" data-action="status" data-id="${task.id}" data-status="não feito">não feito</button>
             <button class="ghost-btn small-btn" data-action="status" data-id="${task.id}" data-status="incompleto">incompleto</button>
             <button class="success-btn small-btn" data-action="status" data-id="${task.id}" data-status="concluído">concluído</button>
-            ${canEditDetails ? `<button class="ghost-btn small-btn" data-action="edit" data-id="${task.id}">Editar</button>
-            <button class="danger-btn small-btn" data-action="delete" data-id="${task.id}">Excluir</button>` : ''}
-          </div>
+            <button class="ghost-btn small-btn" data-action="edit" data-id="${task.id}">Editar</button>
+            <button class="danger-btn small-btn" data-action="delete" data-id="${task.id}">Excluir</button>
+          </div>` : ''}
         </div>
       `;
     }).join('');
@@ -1501,14 +1542,14 @@
     const total = state.tasks.length;
     const todayIdx = (new Date().getDay() + 6) % 7;
     const todayCount = state.tasks.filter(t => t.weekOffset === 0 && t.mode === 'day' && Number(t.day) === todayIdx).length;
-    const done = total ? Math.round((state.tasks.filter(t => t.status === 'concluído').length / total) * 100) : 0;
+    const done = total ? Math.round((state.tasks.filter(t => taskStatus(t) === 'concluído').length / total) * 100) : 0;
     el.statTotal.textContent = total;
     el.statToday.textContent = todayCount;
     el.statDone.textContent = `${done}%`;
     el.weekLabel.textContent = weekTitle(currentWeekOffset);
     el.weekRangeChip.textContent = formatRangeForWeek(currentWeekOffset);
     el.headerSubtitle.textContent = IS_VIEWER
-      ? `${weekTitle(currentWeekOffset)} • ajuste o status das tarefas na aba Tarefas`
+      ? `${weekTitle(currentWeekOffset)} • o viewer mostra todas as tarefas como não feitas`
       : `${weekTitle(currentWeekOffset)} • toque em uma aula para criar tarefa`;
   }
 
@@ -1640,6 +1681,7 @@
   }
 
   function setStatus(id, status){
+    if(IS_VIEWER) return;
     state.tasks = state.tasks.map(t => t.id === id ? {...t, status} : t);
     saveState();
     syncToCloud();
@@ -1824,12 +1866,15 @@
   el.taskPages.oninput = renderTaskPreview;
   el.taskNote.oninput = renderTaskPreview;
 
-  el.statusRow.addEventListener('click', e => {
-    const btn = e.target.closest('.status-btn');
-    if(!btn) return;
-    selectedStatus = btn.dataset.status;
-    syncStatusButtons();
-  });
+  if(el.statusRow){
+    el.statusRow.addEventListener('click', e => {
+      if(IS_VIEWER) return;
+      const btn = e.target.closest('.status-btn');
+      if(!btn) return;
+      selectedStatus = btn.dataset.status;
+      syncStatusButtons();
+    });
+  }
 
   el.saveTaskBtn.onclick = saveTask;
   el.clearTaskBtn.onclick = clearTaskForm;
@@ -1839,7 +1884,10 @@
     if(!btn) return;
     const action = btn.dataset.action;
     const id = btn.dataset.id;
-    if(action === 'status') setStatus(id, btn.dataset.status);
+    if(action === 'status') {
+      if(IS_VIEWER) return;
+      setStatus(id, btn.dataset.status);
+    }
     if(action === 'edit') editTask(id);
     if(action === 'delete') deleteTask(id);
   });
