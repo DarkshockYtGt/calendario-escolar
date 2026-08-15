@@ -10,9 +10,11 @@
   <meta name="theme-color" content="#7c3aed" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="9B Ver" />
+  <meta name="apple-mobile-web-app-title" content="Calendario do Darkshock" />
   <style>
     :root{
+      --anim-speed: 220ms;
+      --accent-3: #7c3aed;
       --bg:#f3f6fb;
       --surface:#ffffff;
       --surface-2:#f8fafc;
@@ -355,7 +357,7 @@
       cursor:pointer;
       position:relative;
       min-width:0;
-      transition: transform .14s ease, box-shadow .14s ease;
+      transition: transform var(--anim-speed) cubic-bezier(.2,.9,.3,1), box-shadow var(--anim-speed) ease, background var(--anim-speed) ease;
     }
 
     .lesson:active{ transform: scale(.985) }
@@ -388,6 +390,24 @@
     .lesson-dot.progress-todo{
       background:var(--danger);
       box-shadow:0 0 0 3px rgba(220,38,38,.15);
+    }
+
+    /* Bolinha de tarefa expirada (data já passou) */
+    .lesson-dot.expired{
+      background: #808080 !important;
+      opacity: 0.2 !important;
+      box-shadow: none !important;
+    }
+
+    /* pulso para tarefas ativas */
+    .lesson-dot.pulse{
+      animation: pulse 1.6s infinite;
+    }
+
+    @keyframes pulse{
+      0%{ transform: scale(1); opacity:1 }
+      50%{ transform: scale(1.45); opacity:0.6 }
+      100%{ transform: scale(1); opacity:1 }
     }
 
     .lesson-name{
@@ -566,6 +586,21 @@
       display:grid;
       gap:8px;
       border-left: 5px solid var(--accent);
+      transform: translateY(0);
+      opacity: 1;
+      transition: transform var(--anim-speed) cubic-bezier(.2,.9,.3,1), opacity var(--anim-speed) ease;
+    }
+
+    .task-item.expired{
+      opacity: 0.55;
+      filter: grayscale(.2);
+      transform: translateY(2px) scale(.995);
+    }
+
+    .mini-pill.expired{
+      background: rgba(128,128,128,0.12);
+      color: #6b6b6b;
+      border-color: rgba(128,128,128,0.2);
     }
 
     .task-top{
@@ -833,6 +868,10 @@
     }
     #tabTask, #backupField{ display:none !important; }
     .bottom-nav{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* No modo viewer, escondemos o contador geral e o card de "salvas no aparelho" */
+    body.viewer-mode .summary-grid{ grid-template-columns: 1fr; }
+    body.viewer-mode .summary-grid .stat:nth-child(1),
+    body.viewer-mode .summary-grid .stat:nth-child(3){ display:none !important; }
   </style>
 </head>
 <body>
@@ -842,7 +881,7 @@
         <div class="logo">9B</div>
         <div>
           <h1>Calendário Escolar</h1>
-          <p id="headerSubtitle">Semana atual • atualiza sozinho quando uma tarefa nova é criada</p>
+          <p id="headerSubtitle">Pedro Leal esteve aqui...</p>
         </div>
       </div>
       <div class="top-tools">
@@ -858,7 +897,7 @@
           <div class="card-head">
             <div>
               <h2>Calendário</h2>
-              <div class="sub">Segunda a sexta cabendo na tela do celular.</div>
+              <div class="sub">App criado por Darkshock👍.</div>
             </div>
             <div class="chips">
               <span class="chip" id="weekLabel">Semana atual</span>
@@ -875,19 +914,9 @@
 
             <div class="summary-grid">
               <div class="stat">
-                <div class="k">Tarefas</div>
-                <div class="v" id="statTotal">0</div>
-                <div class="s">salvas no aparelho</div>
-              </div>
-              <div class="stat">
                 <div class="k">Hoje</div>
                 <div class="v" id="statToday">0</div>
                 <div class="s">tarefas do dia</div>
-              </div>
-              <div class="stat">
-                <div class="k">Feitas</div>
-                <div class="v" id="statDone">0%</div>
-                <div class="s">progresso geral</div>
               </div>
             </div>
 
@@ -1173,10 +1202,17 @@
   const nowForWeek = new Date();
   const defaultWeekOffset = (nowForWeek.getDay() === 0 || nowForWeek.getDay() === 6) ? 1 : 0;
   const savedWeekStart = parseLocalDateKey(state.weekStartKey);
-  const savedOffset = Number.isFinite(state.currentWeekOffset) ? state.currentWeekOffset : defaultWeekOffset;
-  let currentWeekOffset = savedWeekStart
-    ? Math.max(savedOffset - weekDiffWeeks(nowForWeek, savedWeekStart), defaultWeekOffset)
-    : defaultWeekOffset;
+  const savedOffset = Number.isFinite(state.currentWeekOffset) ? state.currentWeekOffset : null;
+  // Evita deslocar o offset quando o relógio do sistema é alterado.
+  // Restauramos o offset salvo somente se o weekStart salvo pertence
+  // à mesma semana calculada a partir da data atual do dispositivo.
+  let currentWeekOffset;
+  if(savedWeekStart && savedOffset !== null){
+    const diff = weekDiffWeeks(nowForWeek, savedWeekStart);
+    currentWeekOffset = (diff === 0) ? savedOffset : defaultWeekOffset;
+  } else {
+    currentWeekOffset = defaultWeekOffset;
+  }
   let activeTab = 'calendar';
   let selectedStatus = 'não feito';
   let editingId = null;
@@ -1214,7 +1250,9 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         tasks: state.tasks,
         currentWeekOffset,
-        weekStartKey: localDateKey(weekStart(new Date())),
+        // Preserve previously-saved weekStartKey when present to avoid
+        // sobrescrever a referência de semana em salvamentos automáticos.
+        weekStartKey: state.weekStartKey || localDateKey(weekStart(new Date())),
         colors,
         theme
       }));
@@ -1304,6 +1342,15 @@
     root.style.setProperty('--c-ingles', colors['Inglês']);
     root.style.setProperty('--c-historia', colors['História']);
     root.style.setProperty('--c-filosofia', colors['Filosofia']);
+  }
+
+  // Small utility helpers
+  function debounce(fn, wait = 180){
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
   }
 
   function weekStart(date){
@@ -1453,9 +1500,13 @@
         const count = slot.count;
         const progressClass = slot.kind === 'done' ? 'progress-done' : (slot.kind === 'partial' ? 'progress-partial' : 'progress-todo');
         const colorClass = subjectClass(subj);
+        // determina se o dia da grade já passou em relação à data do dispositivo (apenas Y/M/D)
+        const slotDate = dateForWeekDay(currentWeekOffset, day.index);
+        const today = new Date(); today.setHours(0,0,0,0);
+        const expired = count && slotDate.getTime() < today.getTime();
         rows.push(`
           <button class="lesson ${colorClass} ${count ? 'has-task' : ''}" data-week="${currentWeekOffset}" data-day="${day.index}" data-subject="${subj}" type="button">
-            <span class="lesson-dot ${count ? progressClass : ''}"></span>
+            <span class="lesson-dot ${count ? progressClass : ''} ${expired ? 'expired' : ''}"></span>
             <span class="lesson-name">${subj}</span>
             <span class="lesson-time">${time}</span>
             ${count ? `<span class="lesson-badge">${count} tarefa${count>1 ? 's' : ''}</span>` : ''}
@@ -1511,19 +1562,24 @@
       const status = taskStatus(task);
       const statusPillClass = status === 'concluído' ? 'status-done' : (status === 'incompleto' ? 'status-inc' : '');
       const canEditDetails = !IS_VIEWER;
+      // determina se a tarefa está vencida comparando apenas Y/M/D com a data do dispositivo
+      const today = new Date(); today.setHours(0,0,0,0);
+      const dueDate = due && due.date ? new Date(due.date) : null;
+      if(dueDate) dueDate.setHours(0,0,0,0);
+      const isExpired = dueDate ? dueDate.getTime() < today.getTime() : false;
 
       return `
-        <div class="task-item" data-id="${task.id}" style="border-left-color: ${subjColor};">
+        <div class="task-item ${isExpired ? 'expired' : ''}" data-id="${task.id}" style="border-left-color: ${subjColor};">
           <div class="task-top">
             <div class="task-title">
               <strong>${escapeHtml(task.subject)}</strong>
               <span>${isNext ? 'Próxima aula' : weekNames[Number(task.day)]} • ${escapeHtml(due.label)}</span>
             </div>
-            <span class="mini-pill ${statusPillClass}">${escapeHtml(task.status)}</span>
+            <span class="mini-pill ${statusPillClass} ${isExpired ? 'expired' : ''}">${escapeHtml(task.status)}${isExpired ? ' • vencida' : ''}</span>
           </div>
           <div class="task-pill-row">
-            ${task.pages ? `<span class="mini-pill">Páginas: ${escapeHtml(task.pages)}</span>` : ''}
-            <span class="mini-pill">${isNext ? 'próxima aula' : 'dia fixo'}</span>
+            ${task.pages ? `<span class="mini-pill ${isExpired ? 'expired' : ''}">Páginas: ${escapeHtml(task.pages)}</span>` : ''}
+            <span class="mini-pill ${isExpired ? 'expired' : ''}">${isNext ? 'próxima aula' : 'dia fixo'}</span>
           </div>
           ${task.note ? `<div class="task-note">${escapeHtml(task.note)}</div>` : ''}
           ${canEditDetails ? `<div class="task-actions">
@@ -1720,14 +1776,16 @@
     setActiveTab('task');
   }
 
+  // Use event delegation for lesson clicks (better performance)
   function bindLessonClicks(){
-    document.querySelectorAll('.lesson').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const subj = btn.dataset.subject;
-        const day = Number(btn.dataset.day);
-        showToast(`${subj} • ${weekNames[day]}`);
-      });
-    });
+    if(!el.calendarGrid) return;
+    el.calendarGrid.onclick = (e) => {
+      const btn = e.target.closest('.lesson');
+      if(!btn) return;
+      const subj = btn.dataset.subject;
+      const day = Number(btn.dataset.day);
+      showToast(`${subj} • ${weekNames[day]}`);
+    };
   }
 
   function renderSettings(){
@@ -1893,7 +1951,7 @@
   });
 
   if (el.taskSearchInput) {
-    el.taskSearchInput.addEventListener('input', renderPending);
+    el.taskSearchInput.addEventListener('input', debounce(renderPending, 220));
   }
 
   document.querySelectorAll('.filter-pill').forEach(pill => {
